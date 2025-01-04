@@ -9,11 +9,22 @@ let hideDescriptions = false;
 let hideTitles = false;
 let favorites = new Set();
 let favoritesFilterActive = false;
-const FAVORITES_KEY = 'FlowFavorites';
-const openInNewTab = false;
-const priorityFlowIds = [
+
+let hiddenFlows = new Set();
+const HIDDEN_FLOWS_KEY = 'HiddenFlows';
+
+const hiddenFlowIds = [
+];
+
+const noshowFlowIds = [
     'flupdate',
     'fltuts',
+];
+
+const FAVORITES_KEY = 'FlowFavorites';
+const openInNewTab = false;
+
+const priorityFlowIds = [
     '2m1x4',
     'afoye',
     '30kk2',
@@ -27,7 +38,8 @@ const priorityFlowIds = [
     '3pw8q',
     '67e3l',
     'j4wox',
-]; 
+    'ppfxh',
+];
 
 const categoryKeywords = [
     'Base',
@@ -52,6 +64,7 @@ const categoryKeywords = [
     'Canvas',
     'Remover',
     'Background',
+    'Depth',
 ];
 
 const defaultPreferences = {
@@ -60,8 +73,10 @@ const defaultPreferences = {
     hideDescriptions: false,
     hideTitles: false,
     sortValue: 'nameAsc',
-    selectedTheme: null // Will be set by ThemeManager
+    showHiddenOnly: false, 
+    selectedTheme: null 
 };
+
 // injectStylesheet('/flow/css/main.css', 'main');
 // injectStylesheet('/core/css/themes.css', 'themes-stylesheet');
 const preferencesManager = new PreferencesManager(defaultPreferences);
@@ -71,6 +86,45 @@ const preferencesManager = new PreferencesManager(defaultPreferences);
 
 checkForUpdate();
 
+function loadHiddenFlows() {
+    const storedHidden = localStorage.getItem(HIDDEN_FLOWS_KEY);
+    if (storedHidden) {
+        try {
+            const parsedHidden = JSON.parse(storedHidden);
+            hiddenFlows = new Set(parsedHidden);
+        } catch (e) {
+            console.error('Error parsing hidden flows from localStorage:', e);
+            hiddenFlows = new Set();
+        }
+    }
+    
+    hiddenFlowIds.forEach(flowId => hiddenFlows.add(flowId));
+    
+    saveHiddenFlows(); 
+}
+
+function saveHiddenFlows() {
+    localStorage.setItem(HIDDEN_FLOWS_KEY, JSON.stringify(Array.from(hiddenFlows)));
+}
+
+function isHidden(flowId) {
+    return hiddenFlows.has(flowId);
+}
+
+function toggleHidden(flowId, button) {
+    if (hiddenFlows.has(flowId)) {
+        hiddenFlows.delete(flowId);
+        button.classList.remove('hidden');
+        button.innerHTML = '<i class="fas fa-eye-slash" aria-label="Hide Flow"></i>';  
+    } else {
+        hiddenFlows.add(flowId);
+        button.classList.add('hidden');
+        button.innerHTML = '<i class="fas fa-eye" aria-label="Unhide Flow"></i>'; 
+    }
+    saveHiddenFlows();
+    animateFlowReorder();
+}
+ 
 function loadFavorites() {
     const storedFavorites = localStorage.getItem(FAVORITES_KEY);
     if (storedFavorites) {
@@ -114,6 +168,10 @@ const createElement = (type, className, textContent = '') => {
 };
 
 function createFlowCard(flow) {
+     if (noshowFlowIds.includes(flow.id)) {
+        return null; 
+    }
+
     const card = createElement('a', 'flow-card');
     card.href = `flow/${flow.url}`;
    
@@ -127,7 +185,22 @@ function createFlowCard(flow) {
 
     let thumbnailUrl = `flow/${flow.url}/media/thumbnail.jpg`;
     let defaultThumbnail = '/core/media/ui/flow_logo.png';
+    let avatarUrl = `flow/${flow.url}/media/avatar.jpg`;
+    
+     const hiddenButton = document.createElement('button');
+    hiddenButton.classList.add('hidden-button');
+    hiddenButton.setAttribute('aria-label', isHidden(flow.id) ? 'Unhide Flow' : 'Hide Flow');
+    hiddenButton.innerHTML = isHidden(flow.id) ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+    if (isHidden(flow.id)) {
+        hiddenButton.classList.add('hidden');
+    }
 
+    hiddenButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleHidden(flow.id, hiddenButton);
+        // card.remove();
+    });
     const favoriteButton = document.createElement('button');
     favoriteButton.classList.add('favorite-button');
     favoriteButton.innerHTML = isFavorited(flow.id) ? '<i class="fas fa-star"></i>' : '<i class="far fa-star"></i>';
@@ -141,15 +214,37 @@ function createFlowCard(flow) {
         toggleFavorite(flow.id, favoriteButton);
     });
 
+    function sanitizeHTML(str) {
+        const temp = document.createElement('div');
+        temp.textContent = str;
+        return temp.innerHTML;
+    }
+    
+    const avatarImage = avatarUrl
+        ? `<div class="avatar-container">
+            <img src="${sanitizeHTML(avatarUrl)}" alt="${sanitizeHTML(flow.name)} Avatar" class="avatar-image" onerror="this.style.display='none';">
+        </div>`
+        : '';
+    
+    const authorBadge = (flow.author && avatarUrl)
+        ? `<div class="author-badge">
+            ${avatarImage}
+            <div class="author-name">${sanitizeHTML(flow.author)}</div>
+        </div>`
+        : '';
+    
     card.innerHTML = `
-        <img src="${thumbnailUrl}" alt="${flow.name} Thumbnail" onerror="this.onerror=null; this.src='${defaultThumbnail}';">
+        <img src="${sanitizeHTML(thumbnailUrl)}" alt="${sanitizeHTML(flow.name)} Thumbnail" onerror="this.onerror=null; this.src='${sanitizeHTML(defaultThumbnail)}';" class="thumbnail-image">
+        
         <div class="flow-card-content">
-            <h3 class="flow-title">${flow.name}</h3>
-            <p class="flow-description">${flow.description}</p>
+            <h3 class="flow-title">${sanitizeHTML(flow.name)}</h3>
+            <p class="flow-description">${sanitizeHTML(flow.description)}</p>
         </div>
+        ${authorBadge}
     `;
-
+    
     card.appendChild(favoriteButton);
+    card.appendChild(hiddenButton);
     card.dataset.flowId = flow.id;
     return card;
 }
@@ -211,7 +306,6 @@ export async function loadFlows() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         allFlows = await response.json();
-        // console.log('allFlows', allFlows);
         allFlows = assignCategories(allFlows);
         categories = updateGlobalCategories(allFlows);
         updateFilterMenu();
@@ -223,6 +317,7 @@ export async function loadFlows() {
 
 function createToggleButtons() {
     const controlsDiv = document.querySelector('.controls');
+    
     const descToggle = createElement('button', 'toggle-button');
     descToggle.id = 'descToggle';
     descToggle.innerHTML = '<i class="fas fa-bug-slash"></i>';
@@ -236,6 +331,13 @@ function createToggleButtons() {
     controlsDiv.appendChild(descToggle);
     controlsDiv.appendChild(titleToggle);
     
+    const showHiddenToggle = createElement('button', 'toggle-button');
+    showHiddenToggle.id = 'showHiddenToggle';
+    showHiddenToggle.innerHTML = '<i class="fas fa-eye-slash"></i>';
+    showHiddenToggle.title = 'Show Hidden Flows';
+    
+    controlsDiv.appendChild(showHiddenToggle);
+    
     const favoritesToggle = createElement('button', 'toggle-button');
     favoritesToggle.id = 'favoritesToggle';
     favoritesToggle.innerHTML = '<i class="fas fa-star"></i>';
@@ -245,17 +347,26 @@ function createToggleButtons() {
     
     descToggle.addEventListener('click', () => toggleDescriptions(descToggle));
     titleToggle.addEventListener('click', () => toggleTitles(titleToggle, descToggle));
+    showHiddenToggle.addEventListener('click', () => toggleShowHidden(showHiddenToggle)); 
     favoritesToggle.addEventListener('click', () => toggleFavoritesFilter(favoritesToggle));
     
     hideDescriptions = preferencesManager.get('hideDescriptions');
     hideTitles = preferencesManager.get('hideTitles');
     favoritesFilterActive = preferencesManager.get('favoritesFilterActive');
+    showHiddenOnly = preferencesManager.get('showHiddenOnly'); 
+    
     descToggle.classList.toggle('active', hideDescriptions);
     descToggle.title = hideDescriptions ? 'Show Descriptions' : 'Hide Descriptions';
+    
     titleToggle.classList.toggle('active', hideTitles);
     titleToggle.title = hideTitles ? 'Show Titles' : 'Hide Titles';
+    
     favoritesToggle.classList.toggle('active', favoritesFilterActive);
     favoritesToggle.title = favoritesFilterActive ? 'Show All Flows' : 'Show Favorites';
+    
+    showHiddenToggle.classList.toggle('active', showHiddenOnly);
+    showHiddenToggle.title = showHiddenOnly ? 'Show All Flows' : 'Show Hidden Flows';
+    showHiddenToggle.innerHTML = showHiddenOnly ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
 }
 
 function toggleFavoritesFilter(button) {
@@ -300,6 +411,18 @@ function toggleTitles(button, descButton) {
     updateFlowCardVisibility();
 }
 
+let showHiddenOnly = false;
+function toggleShowHidden(button) {
+    showHiddenOnly = !showHiddenOnly;
+    preferencesManager.set('showHiddenOnly', showHiddenOnly);
+    
+    button.classList.toggle('active', showHiddenOnly);
+    button.title = showHiddenOnly ? 'Show All Flows' : 'Show Hidden Flows';
+    button.innerHTML = showHiddenOnly ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+    
+    renderFlows(filterCurrentFlows());
+}
+
 function updateFlowCardVisibility() {
     const flowCards = document.querySelectorAll('.flow-card');
     flowCards.forEach(card => {
@@ -319,7 +442,15 @@ function filterCurrentFlows() {
     if (favoritesFilterActive) {
         filteredFlows = filteredFlows.filter(flow => isFavorited(flow.id));
     }
-    
+
+    if (showHiddenOnly) {
+        filteredFlows = filteredFlows.filter(flow => isHidden(flow.id));
+    } else {
+        filteredFlows = filteredFlows.filter(flow => !isHidden(flow.id));
+    }
+
+    filteredFlows = filteredFlows.filter(flow => !noshowFlowIds.includes(flow.id));
+
     filteredFlows = sortFlows(filteredFlows, sortValue);
     return filteredFlows;
 }
@@ -330,7 +461,9 @@ function renderFlows(flows) {
     flows.forEach(flow => {
         if (flow.id !== 'menu') {
             const flowCard = createFlowCard(flow);
-            flowGrid.appendChild(flowCard);
+            if (flowCard) { 
+                flowGrid.appendChild(flowCard);
+            }
         }
     });
     updateFlowCardVisibility();
@@ -365,7 +498,6 @@ function animateFlowReorder() {
         });
     }, 500);
 }
-
 
 export function initializeMenu() {
     const categoryElements = document.querySelectorAll('.menu-category > span');
@@ -434,10 +566,8 @@ function sortFlows(flows, sortValue) {
     }
 
     const topPriorityIds = [
-        'flupdate', 
-        'linker', 
-        'fltuts'
-    
+        // 'flupdate', 
+        // 'fltuts'
     ];
     const topPriorityFlows = [];
     const remainingFlows = [];
@@ -560,8 +690,13 @@ function initializeFilterMenu() {
     }
 }
 
+function initializeHiddenFlows() {
+    loadHiddenFlows();
+}
+
 export function initializeUI() {
     loadFavorites();
+    initializeHiddenFlows();
     initializeMenu();
     initializeSearch();
     initializeSorting();
@@ -623,7 +758,7 @@ function showUpdateDialog(currentVersion, latestVersion) {
         <div class="update-dialog-overlay">
             <div class="update-dialog-container">
                 <div class="update-character">
-          <img src="/core/media/ui/update_logo.png" alt="Update Avatar" />
+                    <img src="/core/media/ui/update_logo.png" alt="Update Avatar" />
                 </div>
                 <div class="update-dialog">
                     <div class="update-content">
@@ -654,7 +789,7 @@ function showUpdateDialog(currentVersion, latestVersion) {
 
     function closeDialog() {
         overlay.style.animation = 'fadeOut 0.3s ease-out forwards';
-        setTimeout(() => overlay.remove(), 0);
+        setTimeout(() => overlay.remove(), 300); 
     }
 
     updateNowBtn.addEventListener('click', () => {
@@ -664,8 +799,6 @@ function showUpdateDialog(currentVersion, latestVersion) {
         window.open(urlToOpen, '_blank');
         closeDialog();
         setFloatingCharacter(currentVersion, latestVersion)
-
-        
     });
 
     remindLaterBtn.addEventListener('click', () => {
@@ -678,7 +811,6 @@ function showUpdateDialog(currentVersion, latestVersion) {
         closeDialog();
         setFloatingCharacter(currentVersion, latestVersion)
     });
-
 }
 
 function setFloatingCharacter(currentVersion, latestVersion) {
@@ -724,4 +856,3 @@ async function checkForUpdate() {
         console.error('Error checking for updates:', error);
     }
 }
-

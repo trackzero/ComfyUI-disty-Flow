@@ -421,9 +421,17 @@ import { store } from  './js/common/scripts/stateManagerMain.js';
         queue();
     });
     document.addEventListener('keydown', function(event) {
-        if (event.ctrlKey && event.key === 'Enter') {
-            queue();
-            event.preventDefault();
+        if (event.key === 'Enter') {
+            if (event.ctrlKey && event.altKey) {
+                interrupt();
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            else if (event.ctrlKey) {
+                queue();
+                event.preventDefault();
+                event.stopPropagation();
+            }
         }
     });
     document.getElementById('interruptButton').addEventListener('click', function () {
